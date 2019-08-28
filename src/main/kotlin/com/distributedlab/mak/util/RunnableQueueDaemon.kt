@@ -15,7 +15,7 @@ class RunnableQueueDaemon : Thread() {
         while (!isInterrupted) {
             latch.await()
 
-            while (queue.isNotEmpty()) {
+            while (queue.isNotEmpty() && !isInterrupted) {
                 queue.pop().invoke()
             }
 
