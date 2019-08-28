@@ -58,6 +58,11 @@ class HistoryObserverDaemon(
                     return@mapNotNull null
                 }
 
+                // Only process incoming payments.
+                if (paymentDetails.balanceTo.id != balanceId) {
+                    return@mapNotNull null
+                }
+
                 val subject = paymentDetails.subject
                     ?.trim()
                     ?.replace(Regex.fromLiteral("[\n\r]"), "")
