@@ -41,7 +41,7 @@ class HistoryObserverDaemon(
                 page = getNextPage()
                 break
             } catch (e: Exception) {
-                Logger.getGlobal().log(Level.WARNING, "Failed to get page (${e.message}, " +
+                Logger.getGlobal().log(Level.WARNING, "Failed to get page (${e.message}), " +
                         "retry in $RETRY_INTERVAL_MS ms")
             }
         }
