@@ -63,11 +63,17 @@ class HistoryObserverDaemon(
                     return@mapNotNull null
                 }
 
-                val subject = paymentDetails.subject
+                var subject = paymentDetails.subject
                     ?.trim()
                     ?.replace(Regex.fromLiteral("[\n\r]"), "")
+                    ?.replace(" ", "")
                     ?.takeIf(String::isNotBlank)
                     ?: return@mapNotNull null
+
+                if (subject.contains("subject")) {
+                    subject = subject.substringAfter("{\"subject\":\"")
+                    subject = subject.substringBefore("\"}")
+                }
 
                 Payment(
                     id = effect.id,
