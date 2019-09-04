@@ -57,6 +57,8 @@ class Runner(
         paymentStateUpdatesQueueDaemon.start()
         Logger.getGlobal().log(Level.INFO, "Payment state updates queue started")
 
+        updatePaymentStatesSometimes()
+
         CountDownLatch(1).await()
     }
 
@@ -138,9 +140,26 @@ class Runner(
                 api.makHelper
                     .setPaymentStates(editableSheetUrl, states)
                     .execute()
+                Logger.getGlobal().log(Level.INFO, "Payment states updated")
             } catch (e: Exception) {
                 Logger.getGlobal().log(Level.WARNING, "Payment states update failed")
             }
         }
+    }
+
+    private fun updatePaymentStatesSometimes() {
+        val task = object : TimerTask() {
+            override fun run() {
+                enqueuePaymentStatesUpdate()
+            }
+        }
+
+        val timer = Timer(true)
+
+        timer.schedule(task, PAYMENT_STATES_UPDATE_INTERVAL_MS, PAYMENT_STATES_UPDATE_INTERVAL_MS)
+    }
+
+    private companion object {
+        private const val PAYMENT_STATES_UPDATE_INTERVAL_MS = 30000L
     }
 }
