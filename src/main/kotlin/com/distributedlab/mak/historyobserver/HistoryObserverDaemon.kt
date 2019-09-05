@@ -1,10 +1,10 @@
 package com.distributedlab.mak.historyobserver
 
+import com.distributedlab.mak.historyobserver.logic.PaymentEffectsFilter
 import com.distributedlab.mak.historyobserver.model.Payment
 import org.tokend.sdk.api.base.model.DataPage
 import org.tokend.sdk.api.base.params.PagingOrder
 import org.tokend.sdk.api.base.params.PagingParamsV2
-import org.tokend.sdk.api.generated.resources.OpPaymentDetailsResource
 import org.tokend.sdk.api.generated.resources.ParticipantEffectResource
 import org.tokend.sdk.api.v3.history.HistoryApi
 import org.tokend.sdk.api.v3.history.params.ParticipantEffectsPageParams
@@ -48,39 +48,12 @@ class HistoryObserverDaemon(
 
         cursor = page.nextCursor
 
+        val filter = PaymentEffectsFilter(startDate, balanceId)
+
         val payments = page
             .items
-            .mapNotNull { effect ->
-                val paymentDetails = effect.operation.details as? OpPaymentDetailsResource
-                    ?: return@mapNotNull null
-
-                if (effect.operation.appliedAt < startDate) {
-                    return@mapNotNull null
-                }
-
-                // Only process incoming payments.
-                if (paymentDetails.balanceTo.id != balanceId) {
-                    return@mapNotNull null
-                }
-
-                var subject = paymentDetails.subject
-                    ?.trim()
-                    ?.replace(Regex.fromLiteral("[\n\r]"), "")
-                    ?.replace(" ", "")
-                    ?.takeIf(String::isNotBlank)
-                    ?: return@mapNotNull null
-
-                if (subject.contains("subject")) {
-                    subject = subject.substringAfter("{\"subject\":\"")
-                    subject = subject.substringBefore("\"}")
-                }
-
-                Payment(
-                    id = effect.id,
-                    referrer = subject,
-                    amount = paymentDetails.amount
-                )
-            }
+            .filter(filter::test)
+            .mapNotNull(Payment.Companion::fromEffect)
 
         if (payments.isNotEmpty()) {
             newPaymentsCallback(payments)
