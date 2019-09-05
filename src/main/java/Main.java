@@ -1,4 +1,5 @@
 import com.distributedlab.mak.Config;
+import com.distributedlab.mak.Refunder;
 import com.distributedlab.mak.Runner;
 
 import java.math.BigDecimal;
@@ -11,7 +12,22 @@ public class Main {
     private static final String HELPER_URL_ENV = "HELPER_URL";
     private static final String START_DATE_ENV = "START_DATE";
 
+    private static final String REFUND_COMMAND = "refund";
+
     public static void main(String[] args) {
+        if (args.length >= 1) {
+            String command = args[0];
+
+            if (command.equals(REFUND_COMMAND)) {
+                startRefunder();
+                return;
+            }
+        }
+
+        startRunner();
+    }
+
+    private static void startRunner() {
         String assetReceiverPassword = System.getenv(RECEIVER_PASSWORD_ENV);
         if (assetReceiverPassword == null || assetReceiverPassword.isEmpty()) {
             throw new IllegalArgumentException(RECEIVER_PASSWORD_ENV + " env must be set");
@@ -51,5 +67,27 @@ public class Main {
                 Config.TOKEND_API_URL,
                 helperUrl
         ).start(startDate);
+    }
+
+    private static void startRefunder() {
+        String assetReceiverPassword = System.getenv(RECEIVER_PASSWORD_ENV);
+        if (assetReceiverPassword == null || assetReceiverPassword.isEmpty()) {
+            throw new IllegalArgumentException(RECEIVER_PASSWORD_ENV + " env must be set");
+        }
+
+        String startDateString = System.getenv(START_DATE_ENV);
+        if (startDateString == null || startDateString.isEmpty()) {
+            throw new IllegalArgumentException(START_DATE_ENV + " env must be set for refund");
+        }
+
+        Date startDate = new Date(Long.parseLong(startDateString) * 1000L);
+
+        new Refunder(
+                Config.ASSET_CODE,
+                Config.ASSET_RECEIVER_EMAIL,
+                assetReceiverPassword.toCharArray(),
+                Config.TOKEND_API_URL
+        )
+                .start(startDate);
     }
 }
