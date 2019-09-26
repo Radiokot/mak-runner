@@ -8,3 +8,6 @@ Processes Conto payments for DL Mak.
 - refund – collects payments from start date and sends them back
 
 See `Main.java` for startup arguments.
+
+## JAR build
+To build a standalone JAR run `shadowJar` Gradle task.
