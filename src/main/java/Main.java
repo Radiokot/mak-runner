@@ -3,7 +3,10 @@ import com.distributedlab.mak.Refunder;
 import com.distributedlab.mak.Runner;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
 import java.util.Date;
+import java.util.HashSet;
+import java.util.Set;
 
 public class Main {
     private static final String FORM_URL_ENV = "EDITABLE_FORM_URL";
@@ -11,6 +14,7 @@ public class Main {
     private static final String RECEIVER_PASSWORD_ENV = "ASSET_RECEIVER_PASSWORD";
     private static final String HELPER_URL_ENV = "HELPER_URL";
     private static final String START_DATE_ENV = "START_DATE";
+    private static final String IGNORED_MAC_IDS_ENV = "IGNORED_MC_IDS";
 
     private static final String REFUND_COMMAND = "refund";
 
@@ -82,12 +86,19 @@ public class Main {
 
         Date startDate = new Date(Long.parseLong(startDateString) * 1000L);
 
+        String ignoredMcIdsString = System.getenv(IGNORED_MAC_IDS_ENV);
+        Set<String> ignoredMcIds = new HashSet<>();
+        if (ignoredMcIdsString != null && !ignoredMcIdsString.isEmpty()) {
+            String[] splitMcIdsString = ignoredMcIdsString.split(",\\s?");
+            ignoredMcIds.addAll(Arrays.asList(splitMcIdsString));
+        }
+
         new Refunder(
                 Config.ASSET_CODE,
                 Config.ASSET_RECEIVER_EMAIL,
                 assetReceiverPassword.toCharArray(),
                 Config.TOKEND_API_URL
         )
-                .start(startDate);
+                .start(startDate, ignoredMcIds);
     }
 }

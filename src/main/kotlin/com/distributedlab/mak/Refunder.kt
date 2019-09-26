@@ -46,9 +46,13 @@ class Refunder(
     }
 
     fun start(
-        startDate: Date
+        startDate: Date,
+        ignoreMcIds: Set<String>
     ) {
         Logger.getGlobal().log(Level.INFO, "Start date is ${startDate.time / 1000L} ($startDate )")
+        if (ignoreMcIds.isNotEmpty()) {
+            Logger.getGlobal().log(Level.INFO, "Ignoring ${ignoreMcIds.joinToString()}")
+        }
 
         Logger.getGlobal().log(Level.INFO, "Signing in...")
         signIn()
@@ -59,7 +63,7 @@ class Refunder(
         collectPayments(startDate)
 
         Logger.getGlobal().log(Level.INFO, "Preparing refund...")
-        doRefundIfNeeded(startDate)
+        doRefundIfNeeded(startDate, ignoreMcIds)
 
         Logger.getGlobal().log(Level.INFO, "Success")
     }
@@ -127,18 +131,34 @@ class Refunder(
             .mapNotNull(Payment.Companion::fromEffect)
     }
 
-    private fun doRefundIfNeeded(startDate: Date) {
-        if (payments.isEmpty()) {
-            Logger.getGlobal().log(Level.INFO, "No payments collected, refund is not needed")
-        }
+    private fun doRefundIfNeeded(
+        startDate: Date,
+        ignoreMcIds: Set<String>
+    ) {
+        val filteredOutPayments = mutableListOf<Payment>()
 
         val totalAmountByAccount = payments
+            .filter { payment ->
+                (!ignoreMcIds.contains(payment.referrer)).also { isAccepted ->
+                    if (!isAccepted) {
+                        filteredOutPayments.add(payment)
+                    }
+                }
+            }
             .groupBy(Payment::sourceAccountId)
             .mapValues { (_, accountPayments) ->
                 accountPayments.fold(BigDecimal.ZERO) { acc, payment ->
                     acc + payment.amount
                 }
             }
+
+        if (totalAmountByAccount.isEmpty()) {
+            Logger.getGlobal().log(Level.INFO, "No payments collected, refund is not needed")
+        }
+
+        if (filteredOutPayments.isNotEmpty()) {
+            Logger.getGlobal().log(Level.INFO, "Ignored ${filteredOutPayments.size} payments by McID")
+        }
 
         val networkParams = try {
             api.general
