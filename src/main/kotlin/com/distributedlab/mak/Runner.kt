@@ -5,10 +5,17 @@ import com.distributedlab.mak.historyobserver.HistoryObserverDaemon
 import com.distributedlab.mak.historyobserver.model.Payment
 import com.distributedlab.mak.model.PaymentState
 import com.distributedlab.mak.util.RunnableQueueDaemon
+import org.tokend.sdk.api.transactions.model.TransactionFailedException
 import org.tokend.sdk.keyserver.KeyServer
 import org.tokend.sdk.keyserver.models.WalletInfo
 import org.tokend.sdk.signing.AccountRequestSigner
 import org.tokend.wallet.Account
+import org.tokend.wallet.NetworkParams
+import org.tokend.wallet.TransactionBuilder
+import org.tokend.wallet.xdr.Fee
+import org.tokend.wallet.xdr.Operation
+import org.tokend.wallet.xdr.PaymentFeeData
+import org.tokend.wallet.xdr.op_extensions.SimplePaymentOp
 import java.math.BigDecimal
 import java.util.*
 import java.util.concurrent.CountDownLatch
@@ -26,6 +33,7 @@ class Runner(
     helperUrl: String
 ) {
     private lateinit var assetOwner: WalletInfo
+    private lateinit var balanceId: String
 
     private val api: Api by lazy {
         Api(tokenDUrl, helperUrl, null, Config.HTTP_LOGS_ENABLED)
@@ -38,6 +46,9 @@ class Runner(
 
     private val paidAmountsByReferrer = mutableMapOf<String, BigDecimal>()
     private val paymentStateUpdatesQueueDaemon = RunnableQueueDaemon()
+
+    private val invalidPaymentsToRefund = mutableSetOf<Payment>()
+    private val invalidPaymentsRefundQueueDaemon = RunnableQueueDaemon()
 
     fun start(
         startDate: Date
@@ -57,7 +68,11 @@ class Runner(
         paymentStateUpdatesQueueDaemon.start()
         Logger.getGlobal().log(Level.INFO, "Payment state updates queue started")
 
+        invalidPaymentsRefundQueueDaemon.start()
+        Logger.getGlobal().log(Level.INFO, "Invalid payments refund queue started")
+
         updatePaymentStatesSometimes()
+        refundInvalidPaymentsSometimes()
 
         CountDownLatch(1).await()
     }
@@ -98,7 +113,7 @@ class Runner(
             throw IllegalStateException("Unable to get balances", e)
         }
 
-        val balanceId = balances
+        balanceId = balances
             .find { it.asset.id == assetCode }
             ?.id
             ?: throw IllegalStateException("No balance found for asset $assetCode")
@@ -115,14 +130,25 @@ class Runner(
     private fun onNewPayments(newPayments: Collection<Payment>) {
         newPayments.forEach { payment ->
             val referrer = payment.referrer
-            val alreadyPaidAmount = paidAmountsByReferrer[referrer] ?: BigDecimal.ZERO
-            val newAmount = alreadyPaidAmount + payment.amount
-            paidAmountsByReferrer[referrer] = newAmount
 
-            Logger.getGlobal().log(Level.INFO, "Received $newAmount total from $referrer")
+            if (VALID_REFERRER_REGEX.matches(referrer)) {
+                val alreadyPaidAmount = paidAmountsByReferrer[referrer] ?: BigDecimal.ZERO
+                val newAmount = alreadyPaidAmount + payment.amount
+                paidAmountsByReferrer[referrer] = newAmount
+
+                Logger.getGlobal().log(Level.INFO, "Received $newAmount total from $referrer")
+            } else {
+                invalidPaymentsToRefund.add(payment)
+
+                Logger.getGlobal().log(
+                    Level.WARNING, "Received ${payment.amount} with " +
+                            "invalid referrer $referrer"
+                )
+            }
         }
 
         enqueuePaymentStatesUpdate()
+        enqueueInvalidPaymentsRefund()
     }
 
     private fun enqueuePaymentStatesUpdate() {
@@ -147,6 +173,81 @@ class Runner(
         }
     }
 
+    private fun enqueueInvalidPaymentsRefund() {
+        invalidPaymentsRefundQueueDaemon.enqueue {
+            if (invalidPaymentsToRefund.isEmpty()) {
+                return@enqueue
+            }
+
+            val networkParams = try {
+                api.general
+                    .getSystemInfo()
+                    .execute()
+                    .get()
+                    .toNetworkParams()
+            } catch (e: Exception) {
+                Logger.getGlobal().log(Level.WARNING, "Unable to load network info")
+                return@enqueue
+            }
+
+            val refundedPayments = mutableSetOf<Payment>()
+
+            invalidPaymentsToRefund.forEach { payment ->
+                try {
+                    refundInvalidPayment(payment, networkParams)
+                    refundedPayments.add(payment)
+                } catch (e: Exception) {
+                    Logger.getGlobal().log(
+                        Level.WARNING, "Unable to refund " +
+                                "payment from ${payment.referrer}"
+                    )
+                }
+            }
+
+            Logger.getGlobal().log(
+                Level.INFO, "${refundedPayments.size} invalid payments " +
+                        "refunded"
+            )
+
+            invalidPaymentsToRefund.removeAll(refundedPayments)
+        }
+    }
+
+    private fun refundInvalidPayment(
+        payment: Payment,
+        networkParams: NetworkParams
+    ) {
+        val zeroFee = Fee(0, 0, Fee.FeeExt.EmptyVersion())
+
+        val op = SimplePaymentOp(
+            sourceBalanceId = balanceId,
+            destAccountId = payment.sourceAccountId,
+            amount = networkParams.amountToPrecised(payment.amount),
+            subject = "\"${payment.referrer}\" is not a valid McID",
+            reference = "REFUND${payment.id}",
+            feeData = PaymentFeeData(
+                zeroFee, zeroFee, false,
+                PaymentFeeData.PaymentFeeDataExt.EmptyVersion()
+            )
+        )
+
+        val tx = TransactionBuilder(networkParams, assetOwner.accountId)
+            .addOperation(Operation.OperationBody.Payment(op))
+            .addSigner(Account.fromSecretSeed(assetOwner.secretSeed))
+            .build()
+
+        try {
+            api.v3.transactions
+                .submit(tx, waitForIngest = false)
+                .execute()
+
+        } catch (e: TransactionFailedException) {
+            if (e.firstOperationResultCode != "op_reference_duplication") {
+                throw e
+            }
+        }
+    }
+
     private fun updatePaymentStatesSometimes() {
         val task = object : TimerTask() {
             override fun run() {
@@ -159,7 +260,21 @@ class Runner(
         timer.schedule(task, PAYMENT_STATES_UPDATE_INTERVAL_MS, PAYMENT_STATES_UPDATE_INTERVAL_MS)
     }
 
+    private fun refundInvalidPaymentsSometimes() {
+        val task = object : TimerTask() {
+            override fun run() {
+                enqueueInvalidPaymentsRefund()
+            }
+        }
+
+        val timer = Timer(true)
+
+        timer.schedule(task, INVALID_PAYMENTS_REFUND_INTERVAL_MS, INVALID_PAYMENTS_REFUND_INTERVAL_MS)
+    }
+
     private companion object {
         private const val PAYMENT_STATES_UPDATE_INTERVAL_MS = 30000L
+        private const val INVALID_PAYMENTS_REFUND_INTERVAL_MS = 30000L
+        private val VALID_REFERRER_REGEX = Regex("^[a-f|0-9]{16}")
     }
 }
