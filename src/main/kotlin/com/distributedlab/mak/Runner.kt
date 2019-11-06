@@ -223,7 +223,7 @@ class Runner(
             sourceBalanceId = balanceId,
             destAccountId = payment.sourceAccountId,
             amount = networkParams.amountToPrecised(payment.amount),
-            subject = "\"${payment.referrer}\" is not a valid McID",
+            subject = "\"${payment.referrer}\" is not a valid McID \uD83D\uDE20",
             reference = "REFUND${payment.id}",
             feeData = PaymentFeeData(
                 zeroFee, zeroFee, false,
