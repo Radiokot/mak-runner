@@ -131,7 +131,7 @@ class Runner(
         newPayments.forEach { payment ->
             val referrer = payment.referrer
 
-            if (VALID_REFERRER_REGEX.matches(referrer)) {
+            if (Config.PAYMENT_REFERRER_PREDICATE.test(referrer)) {
                 val alreadyPaidAmount = paidAmountsByReferrer[referrer] ?: BigDecimal.ZERO
                 val newAmount = alreadyPaidAmount + payment.amount
                 paidAmountsByReferrer[referrer] = newAmount
@@ -275,6 +275,5 @@ class Runner(
     private companion object {
         private const val PAYMENT_STATES_UPDATE_INTERVAL_MS = 30000L
         private const val INVALID_PAYMENTS_REFUND_INTERVAL_MS = 30000L
-        private val VALID_REFERRER_REGEX = Regex("^[a-f|0-9]{16}")
     }
 }

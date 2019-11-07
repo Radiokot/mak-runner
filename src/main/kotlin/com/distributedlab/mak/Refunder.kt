@@ -129,6 +129,7 @@ class Refunder(
         payments = items
             .filter(filter::test)
             .mapNotNull(Payment.Companion::fromEffect)
+            .filter { Config.PAYMENT_REFERRER_PREDICATE.test(it.referrer) }
     }
 
     private fun doRefundIfNeeded(
