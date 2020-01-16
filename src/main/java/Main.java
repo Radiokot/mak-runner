@@ -1,6 +1,7 @@
 import com.distributedlab.mak.Config;
 import com.distributedlab.mak.Refunder;
 import com.distributedlab.mak.Runner;
+import org.tokend.sdk.utils.BigDecimalUtil;
 
 import java.math.BigDecimal;
 import java.util.Arrays;
@@ -15,6 +16,7 @@ public class Main {
     private static final String HELPER_URL_ENV = "HELPER_URL";
     private static final String START_DATE_ENV = "START_DATE";
     private static final String IGNORED_MAC_IDS_ENV = "IGNORED_MC_IDS";
+    private static final String AMOUNT_MULTIPLIER = "AMOUNT_MULTIPLIER";
 
     private static final String REFUND_COMMAND = "refund";
 
@@ -93,12 +95,18 @@ public class Main {
             ignoredMcIds.addAll(Arrays.asList(splitMcIdsString));
         }
 
+        String amountMultiplierString = System.getenv(AMOUNT_MULTIPLIER);
+        BigDecimal amountMultiplier = BigDecimalUtil.INSTANCE.valueOf(
+                amountMultiplierString,
+                BigDecimal.ONE
+        );
+
         new Refunder(
                 Config.ASSET_CODE,
                 Config.ASSET_RECEIVER_EMAIL,
                 assetReceiverPassword.toCharArray(),
                 Config.TOKEND_API_URL
         )
-                .start(startDate, ignoredMcIds);
+                .start(startDate, ignoredMcIds, amountMultiplier);
     }
 }

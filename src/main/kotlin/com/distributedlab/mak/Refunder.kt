@@ -20,6 +20,7 @@ import org.tokend.wallet.xdr.Operation
 import org.tokend.wallet.xdr.PaymentFeeData
 import org.tokend.wallet.xdr.op_extensions.SimplePaymentOp
 import java.math.BigDecimal
+import java.math.MathContext
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.logging.Level
@@ -34,6 +35,7 @@ class Refunder(
     private lateinit var assetOwner: WalletInfo
 
     private lateinit var balanceId: String
+    private var assetTrailingDigits: Int = 0
     private var payments = listOf<Payment>()
 
     private val api: Api by lazy {
@@ -47,7 +49,8 @@ class Refunder(
 
     fun start(
         startDate: Date,
-        ignoreMcIds: Set<String>
+        ignoreMcIds: Set<String>,
+        amountMultiplier: BigDecimal
     ) {
         Logger.getGlobal().log(Level.INFO, "Start date is ${startDate.time / 1000L} ($startDate )")
         if (ignoreMcIds.isNotEmpty()) {
@@ -57,13 +60,13 @@ class Refunder(
         Logger.getGlobal().log(Level.INFO, "Signing in...")
         signIn()
 
-        obtainBalanceId()
+        obtainBalanceInfo()
 
         Logger.getGlobal().log(Level.INFO, "Collecting payments...")
         collectPayments(startDate)
 
         Logger.getGlobal().log(Level.INFO, "Preparing refund...")
-        doRefundIfNeeded(startDate, ignoreMcIds)
+        doRefundIfNeeded(startDate, ignoreMcIds, amountMultiplier)
 
         Logger.getGlobal().log(Level.INFO, "Success")
     }
@@ -83,7 +86,7 @@ class Refunder(
         }
     }
 
-    private fun obtainBalanceId() {
+    private fun obtainBalanceInfo() {
         val balances = try {
             signedApi.v3.accounts
                 .getBalances(assetOwner.accountId)
@@ -93,10 +96,12 @@ class Refunder(
             throw IllegalStateException("Unable to get balances", e)
         }
 
-        balanceId = balances
+        val balance = balances
             .find { it.asset.id == assetCode }
-            ?.id
             ?: throw IllegalStateException("No balance found for asset $assetCode")
+
+        balanceId = balance.id
+        assetTrailingDigits = balance.asset.trailingDigits.toInt()
     }
 
     private fun collectPayments(startDate: Date) {
@@ -134,7 +139,8 @@ class Refunder(
 
     private fun doRefundIfNeeded(
         startDate: Date,
-        ignoreMcIds: Set<String>
+        ignoreMcIds: Set<String>,
+        amountMultiplier: BigDecimal
     ) {
         val filteredOutPayments = mutableListOf<Payment>()
 
@@ -151,6 +157,11 @@ class Refunder(
                 accountPayments.fold(BigDecimal.ZERO) { acc, payment ->
                     acc + payment.amount
                 }
+            }
+            .mapValues { (_, amount) ->
+                amount
+                    .multiply(amountMultiplier, MathContext.DECIMAL64)
+                    .setScale(assetTrailingDigits, BigDecimal.ROUND_DOWN)
             }
 
         if (totalAmountByAccount.isEmpty()) {
