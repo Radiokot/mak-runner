@@ -11,6 +11,9 @@ class RunnableQueueDaemon : Thread() {
     private val queue = LinkedList<() -> Unit>()
     private var latch = CountDownLatch(1)
 
+    val queueSize: Int
+        get() = queue.size
+
     override fun run() {
         while (!isInterrupted) {
             latch.await()
