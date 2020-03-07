@@ -1,19 +1,20 @@
 package com.distributedlab.mak
 
 import com.distributedlab.mak.api.Api
+import com.distributedlab.mak.balancesobserver.BalancesObserverDaemon
 import org.tokend.sdk.api.base.params.PagingParamsV2
 import org.tokend.sdk.api.integrations.dns.params.ClientsPageParams
 import org.tokend.sdk.api.v3.accounts.params.AccountParamsV3
-import org.tokend.sdk.api.v3.balances.params.BalanceParams
 import org.tokend.sdk.keyserver.KeyServer
 import org.tokend.sdk.keyserver.models.WalletInfo
 import org.tokend.sdk.signing.AccountRequestSigner
 import org.tokend.sdk.utils.SimplePagedResourceLoader
 import org.tokend.wallet.Account
 import java.math.BigDecimal
-import java.util.*
+import java.util.concurrent.CountDownLatch
 import java.util.logging.Level
 import java.util.logging.Logger
+import kotlin.math.min
 
 class AmlAlertSniper(
     private val assetCode: String,
@@ -50,21 +51,10 @@ class AmlAlertSniper(
         Logger.getGlobal().log(Level.INFO, "Obtaining balances...")
         obtainBalances(emails)
 
-        Logger.getGlobal().log(Level.INFO, "Obtaining amounts")
-        balancesByEmails
-            .values
-            .map { balanceId ->
-                balanceId to masterSignedApi.v3.balances.getById(balanceId, BalanceParams(listOf("state")))
-                    .execute()
-                    .get()
-                    .state
-                    .available
-            }
-            .forEach {
-                if (it.second.signum() > 0) {
-                    println("${Date()} ${it.first} ${it.second.toPlainString()}")
-                }
-            }
+        observeBalancesAsync()
+        Logger.getGlobal().log(Level.INFO, "Balances polling started")
+
+        CountDownLatch(1).await()
     }
 
     private fun signIn() {
@@ -134,5 +124,32 @@ class AmlAlertSniper(
                 Logger.getGlobal().log(Level.WARNING, "No balance ID found for $email")
             }
         }
+    }
+
+    private fun observeBalancesAsync() {
+        val callback: (Map<String, BigDecimal>) -> Unit = { newAmounts ->
+            println("Update:")
+            newAmounts
+                .filter { it.value.signum() > 0 }
+                .forEach {
+                    println("${it.key} - ${it.value}")
+                }
+        }
+
+        val balances = balancesByEmails.values.toList()
+
+        for (rangeStart in 0 until balances.size step BALANCES_PER_OBSERVER) {
+            val rangeEnd = min(rangeStart + BALANCES_PER_OBSERVER, balances.size)
+
+            BalancesObserverDaemon(
+                balances = balances.subList(rangeStart, rangeEnd),
+                masterSignedApi = masterSignedApi,
+                amountChangesCallback = callback
+            ).start()
+        }
+    }
+
+    private companion object {
+        private const val BALANCES_PER_OBSERVER = 10
     }
 }
