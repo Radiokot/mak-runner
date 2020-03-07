@@ -31,3 +31,6 @@ proguard/
 # IntelliJ
 *.iml
 .idea/
+
+# Secret tests
+src/test/kotlin/dev/
