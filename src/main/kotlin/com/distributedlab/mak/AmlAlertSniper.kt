@@ -215,7 +215,9 @@ class AmlAlertSniper(
                                 amlAlertRequest = AMLAlertRequest(
                                     balanceID = PublicKeyFactory.fromBalanceId(balanceId),
                                     amount = networkParams.amountToPrecised(amountToAml),
-                                    creatorDetails = "{}",
+                                    creatorDetails = """
+                                        {"reason": "$referenceBase"}
+                                    """.trimIndent(),
                                     ext = AMLAlertRequest.AMLAlertRequestExt.EmptyVersion()
                                 ),
                                 ext = CreateAMLAlertRequestOp.CreateAMLAlertRequestOpExt.EmptyVersion()
